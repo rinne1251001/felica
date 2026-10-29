@@ -212,15 +212,18 @@
         while (ui.log.children.length > 100) ui.log.lastElementChild.remove();
     }
 
-    function setConnected(connected) {
-        ui.connect.disabled = connected;
-        ui.disconnect.disabled = !connected;
+    // idle: 未接続 / connecting: 接続処理中（どちらのボタンも押せない）/ connected: 接続済み
+    function setUiState(state) {
+        ui.connect.disabled = state !== 'idle';
+        ui.disconnect.disabled = state !== 'connected';
     }
 
     function explainError(e) {
         switch (e?.name) {
             case 'NotFoundError':
-                return 'デバイスが選択されませんでした。';
+                return '機器が選択されませんでした。選択画面の一覧に RC-S300 が出なかった場合は、'
+                    + 'Chrome / Edge のアドレスバーに about://device-log と入力してからリーダーを挿し直し、'
+                    + 'USB の行に Sony（vendor 054C / 1356）の機器が追加されたか確認してください。';
             case 'SecurityError':
                 return `USB へのアクセスが拒否されました（${e.message}）。他のドライバ/アプリが使用中、`
                     + 'または Permissions-Policy で usb が禁止されている可能性があります。';
@@ -443,11 +446,62 @@
     let running = false;
     let loopPromise = null;
 
+    const SONY_VENDOR_ID = 0x054c;
+    const CHOOSER_HINT_MS = 15000; // 選択画面で待つ時間がこれを超えたらヒントを出す
+    const KNOWN_SONY_READERS = {
+        0x0dc8: 'RC-S300/S',
+        0x0dc9: 'RC-S300/P',
+        0x06c1: 'RC-S380/S',
+        0x06c3: 'RC-S380/P',
+    };
+
+    const hex4 = (n) => n.toString(16).toUpperCase().padStart(4, '0');
+    const isRcs300 = (d) => window.RCS300Reader.FILTERS.some(
+        (f) => f.vendorId === d.vendorId && f.productId === d.productId);
+    const describeUsb = (d) => {
+        const model = d.vendorId === SONY_VENDOR_ID ? KNOWN_SONY_READERS[d.productId] : null;
+        return `${d.productName || '名称不明'}${model ? `（${model}）` : ''}`
+            + ` VID 0x${hex4(d.vendorId)} / PID 0x${hex4(d.productId)}`;
+    };
+    const browserName = () => navigator.userAgentData?.brands
+        ?.filter((b) => !/not.?a.?brand/i.test(b.brand))
+        .map((b) => `${b.brand} ${b.version}`)
+        .join(', ') || navigator.userAgent;
+
+    function waitAtMost(promise, ms, what) {
+        let timer;
+        return Promise.race([
+            promise,
+            new Promise((_, reject) => {
+                timer = setTimeout(() => reject(new Error(
+                    `${what} が ${ms / 1000} 秒以内に応答しませんでした。ブラウザを再起動してから試してください。`)), ms);
+            }),
+        ]).finally(() => clearTimeout(timer));
+    }
+
     async function pickDevice() {
-        const paired = (await navigator.usb.getDevices()).filter((d) =>
-            window.RCS300Reader.FILTERS.some((f) => f.vendorId === d.vendorId && f.productId === d.productId));
+        // 一度許可した RC-S300 が挿さっていれば、選択画面を出さずにそれを使う
+        ui.progress.textContent = '許可済みの機器を確認しています';
+        const granted = await waitAtMost(navigator.usb.getDevices(), 5000, 'navigator.usb.getDevices()');
+        const paired = granted.filter(isRcs300);
         if (paired.length === 1) return paired[0];
-        return navigator.usb.requestDevice({ filters: window.RCS300Reader.FILTERS });
+
+        // ここから先は、ブラウザの選択画面でユーザーが「接続」か「キャンセル」を押すまで戻らない
+        const waiting = 'ブラウザに表示された選択画面（アドレスバーの下）で RC-S300 を選んで「接続」を押してください。'
+            + '一覧が空のときは「キャンセル」を押してください。';
+        ui.progress.textContent = waiting;
+        addLog(waiting);
+        const hint = setTimeout(() => addLog(
+            '選択画面が見当たらない場合: 通常の Chrome / Edge ではなく、アプリやエディタに内蔵されたブラウザ'
+            + '（プレビュー画面など）で開いていると、選択画面が出ないまま待ち続けることがあります。'
+            + 'Chrome か Edge でこのページを直接開いてください。', 'error'), CHOOSER_HINT_MS);
+        try {
+            // 型番（PID）では絞らず、ソニー製の USB 機器をすべて一覧に出す。
+            // RC-S300 の別モデルや RC-S380 が挿さっていても一覧に出るので、何が挿さっているか分かる。
+            return await navigator.usb.requestDevice({ filters: [{ vendorId: SONY_VENDOR_ID }] });
+        } finally {
+            clearTimeout(hint);
+        }
     }
 
     async function pollLoop() {
@@ -491,18 +545,23 @@
         const r = reader;
         reader = null;
         if (r) await r.close();
-        setConnected(false);
+        setUiState('idle');
         ui.device.textContent = '';
         ui.progress.textContent = '';
     }
 
     async function connect() {
-        setConnected(true);
+        setUiState('connecting');
         setStatus('接続中…');
+        addLog(`ブラウザ: ${browserName()}`);
 
         try {
-            ui.progress.textContent = 'デバイスを選択してください';
             const device = await pickDevice();
+            addLog(`選択された機器: ${describeUsb(device)}`);
+            if (!isRcs300(device)) {
+                throw new Error(`選択された機器は RC-S300 ではありません（${describeUsb(device)}）。`
+                    + 'このページは RC-S300（PID 0DC8 / 0DC9）専用です。');
+            }
             reader = new window.RCS300Reader(device);
             // どの手順で止まったか分かるように、各手順をログに残す
             await reader.open({
@@ -514,11 +573,10 @@
             });
             ui.progress.textContent = '';
 
-            ui.device.textContent = `${device.manufacturerName ?? 'Sony'} ${device.productName ?? 'RC-S300'}`
-                + ` (VID 0x${device.vendorId.toString(16).padStart(4, '0')}`
-                + ` / PID 0x${device.productId.toString(16).padStart(4, '0')})`;
+            ui.device.textContent = describeUsb(device);
             addLog('リーダーに接続しました。');
 
+            setUiState('connected');
             running = true;
             loopPromise = pollLoop().finally(teardown);
         } catch (e) {
