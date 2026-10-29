@@ -229,6 +229,9 @@
                     + 'ケーブルが抜けていないか確認してください。';
             case 'InvalidStateError':
                 return `デバイスの状態が不正です（${e.message}）。リーダーを挿し直して再接続してください。`;
+            case 'ReaderTimeoutError':
+                return `${e.message}。リーダーを USB から抜いて挿し直し、ページを再読み込みしてから接続し直してください。`
+                    + '改善しない場合は、別のタブや他のアプリ（NFCポートソフトウェア等）がリーダーを使っていないか確認してください。';
             default:
                 return e?.message ?? String(e);
         }
@@ -472,7 +475,8 @@
                 }
             } catch (e) {
                 console.error(e);
-                if (++errorCount >= MAX_ERRORS) {
+                // 応答が途絶えたリーダーには再試行しても意味がないので即停止
+                if (reader?.broken || ++errorCount >= MAX_ERRORS) {
                     addLog(`読み取りを停止しました: ${explainError(e)}`, 'error');
                     setStatus('エラーにより停止しました', 'error');
                     running = false;
@@ -497,9 +501,18 @@
         setStatus('接続中…');
 
         try {
+            ui.progress.textContent = 'デバイスを選択してください';
             const device = await pickDevice();
             reader = new window.RCS300Reader(device);
-            await reader.open();
+            // どの手順で止まったか分かるように、各手順をログに残す
+            await reader.open({
+                onStep: (message) => {
+                    ui.progress.textContent = message;
+                    addLog(message);
+                    console.info('[RC-S300]', message);
+                },
+            });
+            ui.progress.textContent = '';
 
             ui.device.textContent = `${device.manufacturerName ?? 'Sony'} ${device.productName ?? 'RC-S300'}`
                 + ` (VID 0x${device.vendorId.toString(16).padStart(4, '0')}`

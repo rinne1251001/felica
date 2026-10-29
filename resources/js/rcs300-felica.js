@@ -62,6 +62,27 @@
 
     class ScanCancelled extends Error { }
 
+    // WebUSB の transferIn / transferOut にはタイムアウトが無く、リーダーが応答しないと永遠に待ち続ける。
+    // 一定時間で打ち切ってエラーにするためのヘルパー。
+    const TRANSFER_TIMEOUT_MS = 2000; // 1 コマンドの送受信を待つ上限
+    const SETUP_TIMEOUT_MS = 5000;    // open / claimInterface などを待つ上限
+
+    class ReaderTimeoutError extends Error {
+        constructor(step) {
+            super(`リーダーが応答しません（${step}）`);
+            this.name = 'ReaderTimeoutError';
+            this.step = step;
+        }
+    }
+
+    function withTimeout(promise, ms, step) {
+        let timer;
+        return Promise.race([
+            promise,
+            new Promise((_, reject) => { timer = setTimeout(() => reject(new ReaderTimeoutError(step)), ms); }),
+        ]).finally(() => clearTimeout(timer));
+    }
+
     // =====================================================================
     // RC-S300 ドライバ
     // =====================================================================
@@ -89,45 +110,95 @@
             this.epOut = null;
             this.queue = Promise.resolve();
             this.closed = false;
+            this.broken = false; // 応答が途絶えた（タイムアウトした）ら true。以後の通信はしない
         }
 
         // ---------------------------------------------------------------
         // 接続・切断
         // ---------------------------------------------------------------
-        async open() {
-            const d = this.device;
-            if (!d.opened) await d.open();
-            if (d.configuration === null) await d.selectConfiguration(1);
 
+        /**
+         * @param {object} opts
+         *   onStep (message) => void  進行状況（どこで止まったか分かるように各手順の前に呼ばれる）
+         */
+        async open({ onStep = () => { } } = {}) {
+            const d = this.device;
+            const step = (label, fn) => {
+                onStep(label);
+                return withTimeout(fn(), SETUP_TIMEOUT_MS, label);
+            };
+
+            if (!d.opened) await step('USB デバイスを開いています', () => d.open());
+            if (d.configuration === null) await step('USB 構成を選択しています', () => d.selectConfiguration(1));
+
+            onStep(`USB 構成: ${RCS300Reader.describeDevice(d)}`);
             const target = this.#findBulkInterface();
             if (!target) throw new Error('RC-S300 の通信用インターフェイスが見つかりません。');
 
-            await d.claimInterface(target.interfaceNumber);
+            await step(`インターフェイス ${target.interfaceNumber} を確保しています`,
+                () => d.claimInterface(target.interfaceNumber));
             this.interfaceNumber = target.interfaceNumber;
             this.epIn = target.epIn.endpointNumber;
             this.epOut = target.epOut.endpointNumber;
 
-            await this.transceive(RCS300Reader.CMD.END_TRANSPARENT);
-            await this.transceive(RCS300Reader.CMD.START_TRANSPARENT);
-            await this.transceive(RCS300Reader.CMD.RF_OFF);
-            await sleep(50);
-            await this.transceive(RCS300Reader.CMD.RF_ON);
-            await sleep(50);
+            // 前回の接続が途中で切れた（ページ再読み込み・タブを閉じた等）とき、
+            // ホストとリーダーで「データトグル」がずれて最初のコマンドが黙って捨てられることがある。
+            // ClearFeature(ENDPOINT_HALT) で両方向をリセットしてそろえる。
+            onStep('エンドポイントをリセットしています');
+            for (const [dir, ep] of [['in', this.epIn], ['out', this.epOut]]) {
+                try {
+                    await withTimeout(d.clearHalt(dir, ep), TRANSFER_TIMEOUT_MS, `clearHalt(${dir})`);
+                } catch (e) {
+                    console.warn('[RC-S300] clearHalt に失敗しました（続行します）', dir, e);
+                }
+            }
+
+            const init = [
+                ['END_TRANSPARENT', 'EndTransparentSession'],
+                ['START_TRANSPARENT', 'StartTransparentSession'],
+                ['RF_OFF', 'RF OFF'],
+                ['RF_ON', 'RF ON'],
+            ];
+            for (const [key, label] of init) {
+                onStep(`初期化コマンドを送信しています: ${label}`);
+                await this.transceive(RCS300Reader.CMD[key], label);
+                if (key === 'RF_OFF' || key === 'RF_ON') await sleep(50);
+            }
         }
 
         async close() {
             if (this.closed) return;
             this.closed = true;
+            if (!this.broken) {
+                try {
+                    await this.transceive(RCS300Reader.CMD.RF_OFF, 'RF OFF');
+                    await this.transceive(RCS300Reader.CMD.END_TRANSPARENT, 'EndTransparentSession');
+                } catch (_) { /* 抜去済みなど */ }
+            }
+            if (!this.broken) {
+                try {
+                    if (this.interfaceNumber !== null) {
+                        await withTimeout(this.device.releaseInterface(this.interfaceNumber), SETUP_TIMEOUT_MS, 'releaseInterface');
+                    }
+                } catch (_) { /* noop */ }
+            }
+            // close() は待ち続けている転送も中断させる（応答が途絶えたときはこれで解放する）
             try {
-                await this.transceive(RCS300Reader.CMD.RF_OFF);
-                await this.transceive(RCS300Reader.CMD.END_TRANSPARENT);
-            } catch (_) { /* 抜去済みなど */ }
-            try {
-                if (this.interfaceNumber !== null) await this.device.releaseInterface(this.interfaceNumber);
+                if (this.device.opened) await withTimeout(this.device.close(), SETUP_TIMEOUT_MS, 'close');
             } catch (_) { /* noop */ }
-            try {
-                if (this.device.opened) await this.device.close();
-            } catch (_) { /* noop */ }
+        }
+
+        /** 診断用: USB インターフェイスとエンドポイントの一覧 */
+        static describeDevice(device) {
+            const cfg = device.configuration;
+            if (!cfg) return '（構成が選択されていません）';
+            return cfg.interfaces.map((iface) => {
+                const alt = iface.alternate ?? iface.alternates?.[0];
+                const eps = (alt?.endpoints ?? [])
+                    .map((e) => `${e.direction}${e.endpointNumber}/${e.type}/${e.packetSize}`)
+                    .join(' ');
+                return `IF${iface.interfaceNumber} class=0x${hex2(alt?.interfaceClass ?? 0)} [${eps}]`;
+            }).join(' | ');
         }
 
         // ---------------------------------------------------------------
@@ -136,7 +207,7 @@
 
         /** FeliCa コマンドを送り、カードの応答パケット（先頭が長さバイト）を返す。無応答なら null */
         async felicaCommand(cmd, timeoutMs = 100) {
-            const res = await this.transceive(this.#buildCommunicateThruEx(cmd, timeoutMs));
+            const res = await this.transceive(this.#buildCommunicateThruEx(cmd, timeoutMs), `FeliCa コマンド 0x${hex2(cmd[0])}`);
             if (res.length < 2) return null;
             const sw = (res[res.length - 2] << 8) | res[res.length - 1];
             if (sw !== 0x9000) return null;
@@ -379,8 +450,11 @@
         // ---------------------------------------------------------------
 
         /** RC-S300 にコマンドを送り、応答のデータ部（ヘッダー除去済み）を返す */
-        transceive(payload) {
+        transceive(payload, label = 'コマンド') {
             const run = async () => {
+                if (this.broken) {
+                    throw new Error('リーダーとの通信が途絶えています。USB を抜き差ししてから再接続してください。');
+                }
                 this.seq = (this.seq + 1) & 0xff;
                 const seq = this.seq;
                 const len = payload.length;
@@ -395,19 +469,32 @@
                 packet[6] = seq;                // シーケンス番号（応答にそのまま返る）
                 packet.set(payload, 10);
 
-                const out = await this.device.transferOut(this.epOut, packet);
-                if (out.status !== 'ok') throw new Error(`transferOut 失敗: ${out.status}`);
+                try {
+                    const out = await withTimeout(
+                        this.device.transferOut(this.epOut, packet), TRANSFER_TIMEOUT_MS, `${label} の送信`);
+                    if (out.status !== 'ok') throw new Error(`transferOut 失敗: ${out.status}`);
 
-                // 1 ブロック読み取りの応答は最大 55 バイトなので 64 バイトで足りる
-                const result = await this.device.transferIn(this.epIn, 64);
-                if (result.status !== 'ok' || !result.data) throw new Error(`transferIn 失敗: ${result.status}`);
+                    // 前回の接続で読まれずに残った応答が先に届くことがあるので、
+                    // シーケンス番号が一致する応答が来るまで読み飛ばす
+                    for (let attempt = 0; attempt < 4; attempt++) {
+                        // 1 ブロック読み取りの応答は最大 55 バイトなので 64 バイトで足りる
+                        const result = await withTimeout(
+                            this.device.transferIn(this.epIn, 64), TRANSFER_TIMEOUT_MS, `${label} の応答待ち`);
+                        if (result.status !== 'ok' || !result.data) throw new Error(`transferIn 失敗: ${result.status}`);
 
-                const bytes = new Uint8Array(result.data.buffer, result.data.byteOffset, result.data.byteLength);
-                if (bytes.length < 10 || bytes[0] !== 0x83) throw new Error('RC-S300 から想定外の応答を受信しました。');
-                if (bytes[6] !== seq) throw new Error('応答のシーケンス番号が一致しません。');
-
-                const dataLen = bytes[1] | (bytes[2] << 8) | (bytes[3] << 16) | (bytes[4] << 24);
-                return bytes.slice(10, 10 + dataLen);
+                        const bytes = new Uint8Array(result.data.buffer, result.data.byteOffset, result.data.byteLength);
+                        if (bytes.length >= 10 && bytes[0] === 0x83 && bytes[6] === seq) {
+                            const dataLen = bytes[1] | (bytes[2] << 8) | (bytes[3] << 16) | (bytes[4] << 24);
+                            return bytes.slice(10, 10 + dataLen);
+                        }
+                        console.warn('[RC-S300] 古い応答を読み飛ばしました:', toHex(bytes, ' '));
+                    }
+                    throw new Error('RC-S300 から想定外の応答が続きました。USB を抜き差ししてから再接続してください。');
+                } catch (e) {
+                    // 応答待ちのまま転送が残っているので、以後この接続は使わない
+                    if (e instanceof ReaderTimeoutError) this.broken = true;
+                    throw e;
+                }
             };
 
             const p = this.queue.then(run, run);
