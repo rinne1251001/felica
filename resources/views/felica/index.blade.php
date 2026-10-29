@@ -227,12 +227,14 @@
             || (e?.name === 'NetworkError' && /claim/i.test(e.message ?? ''));
         if (claimFailed) {
             const head = `RC-S300 の通信用インターフェイス（インターフェイス 1）を確保できませんでした（${e.message}）。`;
+            // Windows の Chrome は、接続時（または起動時）に読み取ったドライバ情報を使う。
+            // 情報が届いていないインターフェイスの確保は、届くまで待ち続ける。
             return isWindows()
-                ? head + 'Windows では、このインターフェイスに WinUSB ドライバが入っていないと WebUSB から使えません。'
-                    + 'Zadig で「FeliCa Port/PaSoRi 4.0 (Interface 1)」のドライバを WinUSB に置き換え、'
-                    + 'リーダーを挿し直してからページを再読み込みしてください。'
+                ? head + 'Chrome がこのインターフェイスのドライバ情報を取得できていません。'
+                    + '(1) Chrome を完全に終了して起動し直し（about://restart）、リーダーを挿し直す '
+                    + '(2) ソニーの「NFCポートソフトウェア」が入っていればアンインストールする（WebUSB と同時に使えません） '
+                    + '(3) それでも直らなければ about://device-log の「Interface 1」や「vid_054c」を含む行を確認してください。'
                 : head + '別のタブや他のアプリがリーダーを使っていないか確認し、リーダーを挿し直してから'
-                    + 'ページを再読み込みしてください。';
         }
         switch (e?.name) {
             case 'NotFoundError':
