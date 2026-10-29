@@ -171,7 +171,7 @@
         async close() {
             if (this.closed) return;
             this.closed = true;
-            if (!this.broken) {
+            if (!this.broken && this.epOut !== null) {
                 try {
                     await this.transceive(RCS300Reader.CMD.RF_OFF, 'RF OFF');
                     await this.transceive(RCS300Reader.CMD.END_TRANSPARENT, 'EndTransparentSession');

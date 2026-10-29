@@ -218,7 +218,22 @@
         ui.disconnect.disabled = state !== 'connected';
     }
 
+    const platformName = () => navigator.userAgentData?.platform || navigator.platform || '不明';
+    const isWindows = () => /^win/i.test(platformName());
+
     function explainError(e) {
+        // インターフェイス 1（RC-S300 の通信用）を確保できなかった
+        const claimFailed = (e?.name === 'ReaderTimeoutError' && /インターフェイス/.test(e.step ?? ''))
+            || (e?.name === 'NetworkError' && /claim/i.test(e.message ?? ''));
+        if (claimFailed) {
+            const head = `RC-S300 の通信用インターフェイス（インターフェイス 1）を確保できませんでした（${e.message}）。`;
+            return isWindows()
+                ? head + 'Windows では、このインターフェイスに WinUSB ドライバが入っていないと WebUSB から使えません。'
+                    + 'Zadig で「FeliCa Port/PaSoRi 4.0 (Interface 1)」のドライバを WinUSB に置き換え、'
+                    + 'リーダーを挿し直してからページを再読み込みしてください。'
+                : head + '別のタブや他のアプリがリーダーを使っていないか確認し、リーダーを挿し直してから'
+                    + 'ページを再読み込みしてください。';
+        }
         switch (e?.name) {
             case 'NotFoundError':
                 return '機器が選択されませんでした。選択画面の一覧に RC-S300 が出なかった場合は、'
@@ -553,7 +568,7 @@
     async function connect() {
         setUiState('connecting');
         setStatus('接続中…');
-        addLog(`ブラウザ: ${browserName()}`);
+        addLog(`ブラウザ: ${browserName()} / OS: ${platformName()}`);
 
         try {
             const device = await pickDevice();
