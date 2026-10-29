@@ -620,6 +620,14 @@
         return;
     }
 
+    // Blade は PHP がその場で描画するので常に最新だが、JS は Vite でビルドし直さないと古いまま残る
+    const REQUIRED_LIB_VERSION = 2;
+    if ((window.RCS300Reader.VERSION ?? 1) < REQUIRED_LIB_VERSION) {
+        showWarning('読み込まれた rcs300-felica.js が古いビルドのままです。npm run build をやり直すか、'
+            + 'npm run dev を起動してから、このページを再読み込みしてください。');
+        return;
+    }
+
     ui.connect.addEventListener('click', connect);
     ui.disconnect.addEventListener('click', disconnect);
 

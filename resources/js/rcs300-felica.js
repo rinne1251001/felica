@@ -87,6 +87,8 @@
     // RC-S300 ドライバ
     // =====================================================================
     class RCS300Reader {
+        static VERSION = 2;
+
         static FILTERS = [
             { vendorId: 0x054c, productId: 0x0dc8 }, // RC-S300/S（業務用）
             { vendorId: 0x054c, productId: 0x0dc9 }, // RC-S300/P（個人用）
