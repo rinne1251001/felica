@@ -12,7 +12,7 @@
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     const toHex = (bytes, sep = '') =>
         Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join(sep).toUpperCase();
-    const fromHex = (hex) => Uint8Array.from(hex.match(/.{2}/g) ?? [], (h) => parseInt(h, 16));
+    const fromHex = (hex) => Uint8Array.from(hex?.match(/.{2}/g) ?? [], (h) => parseInt(h, 16));
     const hex4 = (n) => n.toString(16).toUpperCase().padStart(4, '0');
     const hex2 = (n) => n.toString(16).toUpperCase().padStart(2, '0');
 
@@ -38,11 +38,20 @@
 
     // FeliCa Lite / Lite-S のブロック構成（サービス検索に非対応のため既知の番号を読む）
     const LITE_SERVICE = 0x000b; // 読み取り専用・認証不要
+    // RC / MAC / CK / MAC_A は認証用のブロックで、単独では読み出せない。
+    // 読めなかったことも分かるように、一覧には含めて結果（エラー）を表示する。
     const LITE_BLOCKS = [
         ...Array.from({ length: 14 }, (_, i) => [i, `S_PAD${i}`]),
-        [0x0e, 'REG'], [0x82, 'ID'], [0x83, 'D_ID'], [0x84, 'SER_C'], [0x85, 'SYS_C'],
-        [0x86, 'CKV'], [0x88, 'MC'], [0x90, 'WCNT'], [0x92, 'STATE'], [0xa0, 'CRC_CHECK'],
+        [0x0e, 'REG'], [0x80, 'RC'], [0x81, 'MAC'], [0x82, 'ID'], [0x83, 'D_ID'], [0x84, 'SER_C'],
+        [0x85, 'SYS_C'], [0x86, 'CKV'], [0x87, 'CK'], [0x88, 'MC'], [0x90, 'WCNT'], [0x91, 'MAC_A'],
+        [0x92, 'STATE'], [0xa0, 'CRC_CHECK'],
     ];
+    const LITE_BLOCK_NOTES = {
+        RC: '認証を始めるとき読み取り側が乱数を書き込むブロック（書き込み専用）',
+        MAC: '他のブロックと一緒に読んだときだけ、そのデータに対する MAC が返る',
+        CK: 'カード鍵（書き込み専用。読み出せない）',
+        MAC_A: 'MAC 付き書き込み・読み出しで、他のブロックと一緒に使う',
+    };
 
     function describeService(code) {
         const attribute = code & 0x3f;
@@ -87,7 +96,7 @@
     // RC-S300 ドライバ
     // =====================================================================
     class RCS300Reader {
-        static VERSION = 2;
+        static VERSION = 3;
 
         static FILTERS = [
             { vendorId: 0x054c, productId: 0x0dc8 }, // RC-S300/S（業務用）
@@ -428,9 +437,18 @@
                 checkCancel();
                 onProgress(`FeliCa Lite: ブロック ${label} を読み取り中…`);
                 const rb = await this.readBlock(idmBytes, LITE_SERVICE, no);
-                if (rb.ok) svc.blocks.push({ no, label, hex: toHex(rb.data) });
+                if (rb.ok) {
+                    svc.blocks.push({ no, label, hex: toHex(rb.data) });
+                } else {
+                    // 読めなかったブロックも残す（hex: null、カードが返したステータスフラグ付き）
+                    svc.blocks.push({
+                        no, label, hex: null,
+                        error: rb.status ? `ステータスフラグ ${hex2(rb.status[0])} ${hex2(rb.status[1])}` : 'カードが応答しませんでした',
+                        note: LITE_BLOCK_NOTES[label] ?? null,
+                    });
+                }
             }
-            svc.status = svc.blocks.length > 0 ? 'read' : 'unreadable';
+            svc.status = svc.blocks.some((b) => b.hex) ? 'read' : 'unreadable';
         }
 
         /** STUDENT_ID_RULE で指定した位置だけを読む（全読み取りより高速） */
@@ -609,6 +627,7 @@
             const bytes = [];
             const pos = [];
             for (const blk of service.blocks) {
+                if (!blk.hex) continue; // 読めなかったブロックは飛ばす
                 fromHex(blk.hex).forEach((b, i) => {
                     bytes.push(b);
                     pos.push({ block: blk.no, offset: i });
@@ -657,7 +676,7 @@
             const blockCount = Math.ceil((rule.offset + rule.length) / 16);
             for (let i = 0; i < blockCount; i++) {
                 const blk = svc.blocks.find((b) => b.no === rule.block + i);
-                if (!blk) return null;
+                if (!blk?.hex) return null;
                 bytes.push(...fromHex(blk.hex));
             }
             return FelicaAnalyzer.decodeField(bytes.slice(rule.offset, rule.offset + rule.length), rule.encoding);

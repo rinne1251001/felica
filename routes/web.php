@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\FelicaController;
+use App\Http\Controllers\StudentController;
 use Illuminate\Support\Facades\Route;
 
 
@@ -12,3 +13,6 @@ Route::get('/', [FelicaController::class, 'index'])
 Route::post('/felica/idm', [FelicaController::class, 'store'])
     ->middleware('throttle:60,1')
     ->name('felica.store');
+
+// students
+Route::get('students', [StudentController::class, 'index'])->name('students.index');

@@ -278,7 +278,7 @@
             ['PMm', scan.pmm],
             ['IC 種別コード', `0x${scan.icType}`],
             ['システム', scan.systems.map((s) => s.systemCode).join(', ') || '-'],
-            ['読めたサービス', `${readable.length} 件（${readable.reduce((n, s) => n + s.blocks.length, 0)} ブロック）`],
+            ['読めたサービス', `${readable.length} 件（${readable.reduce((n, s) => n + s.blocks.filter((b) => b.hex).length, 0)} ブロック）`],
             ['読み取り日時', new Date(scan.scannedAt).toLocaleString()],
             ['状態', scan.complete ? '完了' : '一部のみ（カードが離れた・中止など）'],
         ];
@@ -359,8 +359,15 @@
 
     function renderService(svc) {
         const rows = svc.blocks.map((blk) => {
-            const bytes = fromHex(blk.hex);
             const no = blk.label ? `${hex2(blk.no)} ${blk.label}` : hex2(blk.no);
+            if (!blk.hex) {
+                // 読めなかったブロック: カードが返したエラーと、ブロックの役割を表示
+                return h('tr', {},
+                    h('td', { class: 'mono' }, no),
+                    h('td', { class: 'mono warnings' }, `読み出し不可（${blk.error}）`),
+                    h('td', { class: 'muted' }, blk.note ?? ''));
+            }
+            const bytes = fromHex(blk.hex);
             return h('tr', {},
                 h('td', { class: 'mono' }, no),
                 h('td', { class: 'mono' }, toHex(bytes, ' ')),
@@ -371,11 +378,14 @@
                 h('thead', {}, h('tr', {}, h('th', {}, 'ブロック'), h('th', {}, '16進'), h('th', {}, 'ASCII'))),
                 h('tbody', {}, ...rows)));
 
-        const allBytes = svc.blocks.flatMap((b) => Array.from(fromHex(b.hex)));
+        const readBlocks = svc.blocks.filter((b) => b.hex);
+        const unreadable = svc.blocks.length - readBlocks.length;
+        const allBytes = readBlocks.flatMap((b) => Array.from(fromHex(b.hex)));
         const text = sjisOf(allBytes);
 
         const title = `サービス ${svc.code} — ${svc.kind}・${svc.access}・認証不要 — `
-            + `${svc.blocks.length} ブロック${svc.truncated ? `（上限 ${MAX_BLOCKS} で打ち切り）` : ''}`;
+            + `${readBlocks.length} ブロック${unreadable ? `（読み出し不可 ${unreadable}）` : ''}`
+            + `${svc.truncated ? `（上限 ${MAX_BLOCKS} で打ち切り）` : ''}`;
         return h('details', { open: true },
             h('summary', { class: 'mono' }, title),
             table,
@@ -638,7 +648,7 @@
     }
 
     // Blade は PHP がその場で描画するので常に最新だが、JS は Vite でビルドし直さないと古いまま残る
-    const REQUIRED_LIB_VERSION = 2;
+    const REQUIRED_LIB_VERSION = 3;
     if ((window.RCS300Reader.VERSION ?? 1) < REQUIRED_LIB_VERSION) {
         showWarning('読み込まれた rcs300-felica.js が古いビルドのままです。npm run build をやり直すか、'
             + 'npm run dev を起動してから、このページを再読み込みしてください。');

@@ -4,6 +4,432 @@
 @source '../../storage/framework/views/*.php';
 
 @theme {
-    --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
-        'Segoe UI Symbol', 'Noto Color Emoji';
+    --color-bg: #FFFFFF;
+    --color-font: #28263E;
+    --color-font-light: color-mix(in srgb, var(--color-font) 30%, var(--color-bg) 70%);
+    --color-main: #8090C1;
+    --color-sub: #F7F2EC;
+    --color-accent: #F29C8F;
+
+    --color-ok: ;
+    --color-ok-font: ;
+    --color-error: ;
+    --color-error-font: ;
+    --color-warn: ;
+    --color-warn-font: ;
+}
+
+/* ↓要素名セレクタ */
+html {
+    scroll-behavior: smooth;
+}
+
+body {
+    font-family: sans-serif;
+    color: var(--color-font);
+    background-color: var(--color-bg);
+}
+
+body.menu-open {
+    overflow: hidden;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible {
+    outline: 3px solid var(--color-accent);
+    outline-offset: 4px;
+}
+
+a {
+    color: var(--color-main);
+}
+
+input {
+    min-width: 0;
+    border: var(--color-font-light) 1px solid;
+    outline: none;
+}
+
+
+/* ↓クラス＆IDセレクタ */
+/* 成功、失敗、注意の文字色 */
+.ok {
+    color: var(--color-ok-font);
+}
+
+.error {
+    color: var(--color-error-font);
+}
+
+.warn {
+    color: var(--color-warn-font);
+}
+
+/* =========================
+    PCヘッダー
+========================= */
+.pc-header {
+    min-height: 150px;
+    padding: 20px 4.5%;
+    display: grid;
+    grid-template-columns: 1fr 150px 1fr;
+    align-items: center;
+    gap: 20px;
+    background: var(--color-bg);
+    box-shadow: 0 3px 12px rgb(90 60 30 / 7%);
+    position: relative;
+    z-index: 10;
+}
+
+.pc-nav ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    gap: clamp(16px, 2vw, 36px);
+}
+
+.pc-nav a,
+.pc-nav button {
+    display: inline-block;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.pc-nav button {
+    color: var(--color-main);
+    cursor: pointer;
+}
+
+.pc-nav a:hover,
+.pc-nav button:hover {
+    opacity: 0.65;
+}
+
+.pc-nav-left {
+    justify-self: start;
+}
+
+.pc-nav-left ul {
+    gap: clamp(18px, 2.5vw, 45px);
+}
+
+.pc-header>.logo {
+    justify-self: center;
+}
+
+.main-nav-right {
+    justify-self: end;
+}
+
+.main-nav-right ul {
+    justify-content: flex-end;
+    gap: clamp(15px, 2vw, 35px);
+}
+
+.pc-nav-left a,
+.main-nav-right a,
+.main-nav-right button {
+    font-size: clamp(14px, 1.1vw, 20px);
+}
+
+/* ロゴ：画像がない場合の仮ロゴ */
+.logo {
+    width: 100px;
+    height: 100px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    color: var(--color-main);
+    flex-shrink: 0;
+}
+
+.logo img {
+    width: 100%;
+    height: 100%;
+}
+
+.logo-small {
+    width: 65px;
+    height: 65px;
+}
+
+/* ログアウトボタン */
+.company-banner {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px 14px;
+    background: #fffdf5;
+    white-space: nowrap;
+}
+
+.company-banner span {
+    color: var(--color-main);
+    margin-left: 12px;
+}
+
+/* =========================
+    スマホヘッダー
+========================= */
+.mobile-header {
+    display: none;
+}
+
+.menu-toggle {
+    width: 42px;
+    height: 42px;
+    border: none;
+    background: transparent;
+    padding: 7px;
+    cursor: pointer;
+    position: relative;
+    z-index: 120;
+}
+
+.hamb-line {
+    display: block;
+    width: 100%;
+    height: 3px;
+    background: var(--color-main);
+    position: absolute;
+    left: 0;
+    transition:
+        transform 0.3s ease,
+        top 0.3s ease,
+        opacity 0.2s ease;
+}
+
+.hamb-line:nth-child(1) {
+    top: 10px;
+}
+
+.hamb-line:nth-child(2) {
+    top: 19px;
+}
+
+.hamb-line:nth-child(3) {
+    top: 28px;
+}
+
+.menu-toggle.active .hamb-line:nth-child(1) {
+    top: 19px;
+    transform: rotate(45deg);
+}
+
+.menu-toggle.active .hamb-line:nth-child(2) {
+    opacity: 0;
+}
+
+.menu-toggle.active .hamb-line:nth-child(3) {
+    top: 19px;
+    transform: rotate(-45deg);
+}
+
+/* =========================
+    スマホメニュー全画面
+========================= */
+
+.mobile-menu {
+    position: fixed;
+    padding-top: 82px;
+    inset: 0;
+    z-index: 100;
+    background: var(--color-bg);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    visibility: hidden;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-8px);
+    transition:
+        opacity 0.25s ease,
+        transform 0.25s ease,
+        visibility 0.25s;
+}
+
+.mobile-menu.open {
+    visibility: visible;
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0);
+}
+
+.mobile-menu-links {
+    list-style: none;
+    margin: 0;
+    padding: 38px 20px 10px;
+    text-align: center;
+}
+
+.mobile-menu-links li {
+    margin: 0;
+    padding: 0;
+}
+
+.mobile-menu-links a {
+    display: block;
+    padding: 19px 10px;
+    font-weight: 700;
+    transition: background 0.2s;
+}
+
+.mobile-menu-links a:hover {
+    background: rgb(135 74 44 / 7%);
+}
+
+/* =========================
+    メッセージのモーダル（「保存しました。」「削除できません」など）
+========================= */
+.flash-modal {
+    margin: auto;
+    padding: 0;
+    width: min(90vw, 420px);
+    border-radius: 12px;
+    background: var(--color-bg);
+    box-shadow: 0 10px 30px rgb(0 0 0 / 0.2);
+}
+
+.flash-modal::backdrop {
+    background: rgb(0 0 0 / 0.4);
+}
+
+.flash-modal-content {
+    position: relative;
+    padding: 48px 24px 36px;
+    text-align: center;
+    line-height: 1.7;
+    outline: none;
+}
+
+.flash-modal-close {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    font-size: 24px;
+    line-height: 1;
+    color: var(--color-font-light);
+    cursor: pointer;
+}
+
+.flash-modal-close:hover {
+    background: var(--color-sub);
+}
+
+
+/* =========================
+    レイアウト
+========================= */
+.main {
+    padding-block: 40px;
+}
+
+.content-wrapper {
+    width: min(1000px, 100% - clamp(16px, 4vw, 32px) * 2);
+    margin-inline: auto;
+    display: flow-root;
+}
+
+
+/* =========================
+    レスポンシブ切り替え
+========================= */
+/* 1100px以下の時 */
+@media (max-width: 1100px) {
+    .pc-header {
+        padding-inline: 22px;
+        grid-template-columns: 1fr 95px 1fr;
+        gap: 12px;
+    }
+
+    .pc-nav ul {
+        gap: 13px;
+    }
+
+    .pc-nav a,
+    .pc-nav button,
+    .main-nav-right a,
+    .main-nav-right button {
+        font-size: 14px;
+    }
+
+    .logo {
+        transform: scale(0.85);
+    }
+
+    .company-banner {
+        display: none;
+    }
+}
+
+/* 767px以下の時 */
+@media (max-width: 767px) {
+    .pc-header {
+        display: none;
+    }
+
+    .mobile-header {
+        height: 82px;
+        padding: 8px 25px;
+        display: grid;
+        grid-template-columns: 1fr auto 1fr;
+        align-items: center;
+        background: var(--color-bg);
+        box-shadow: 0 3px 12px rgb(90 60 30 / 7%);
+        position: relative;
+        z-index: 110;
+    }
+
+    .mobile-header .logo {
+        grid-column: 2;
+    }
+
+    .mobile-header-actions {
+        justify-self: end;
+        display: flex;
+        align-items: center;
+        gap: 22px;
+    }
+
+    body.menu-open .mobile-header {
+        position: sticky;
+        top: 0;
+    }
+
+    .mobile-menu-links a {
+        font-size: 21px;
+    }
+}
+
+/* 380px以下の時 */
+@media (max-width: 380px) {
+    .mobile-header {
+        padding-inline: 12px;
+    }
+
+    .mobile-header-actions {
+        gap: 12px;
+    }
+
+    .mobile-menu-links a {
+        font-size: 19px;
+        padding-block: 16px;
+    }
+}
+
+/* 激しいアニメーションや画面がグニャグニャ動く演出が、前庭障害や乗り物酔いのような体調不良（めまいや吐き気など）を引き起こす人への配慮 */
+@media (prefers-reduced-motion: reduce) {
+
+    *,
+    *::before,
+    *::after {
+        scroll-behavior: auto !important;
+        transition-duration: 0.01ms !important;
+    }
 }
