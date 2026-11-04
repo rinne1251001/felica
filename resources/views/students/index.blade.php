@@ -11,7 +11,19 @@
     <main class="main">
         <div class="content-wrapper">
 
-            ここに中身を書く
+            {{ $students->count() }}件
+
+            @forelse($students as $student)
+                <a href="{{ route('students.show', $student) }}">{{ $student->name }}</a>
+                <a href="{{ route('students.edit', $student) }}">編集</a><br>
+                <form method="POST" action="{{ route('students.destroy', $student) }}">
+                    @csrf
+                    @method('DELETE')
+                    <button>この生徒を削除</button>
+                </form>
+            @empty
+                いません
+            @endforelse
 
         </div>
     </main>
