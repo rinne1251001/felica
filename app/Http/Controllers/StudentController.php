@@ -32,7 +32,7 @@ class StudentController extends Controller
     }
 
     // 新規作成保存処理
-    public function store(Request $request, ?student $student = null): RedirectResponse
+    public function store(Request $request, ?Student $student = null): RedirectResponse
     {
         // バリデーションチェック
         $validated = $request->validate([
@@ -81,7 +81,7 @@ class StudentController extends Controller
     }
 
     // 削除処理
-   public function destroy(Student $student): RedirectResponse
+    public function destroy(Student $student): RedirectResponse
     {
         $student->delete();
 

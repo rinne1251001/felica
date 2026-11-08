@@ -38,7 +38,6 @@ button:focus-visible,
 a:focus-visible,
 input:focus-visible {
     outline: 3px solid var(--color-accent);
-    outline-offset: 4px;
 }
 
 a {
@@ -334,6 +333,21 @@ input {
     width: min(1000px, 100% - clamp(16px, 4vw, 32px) * 2);
     margin-inline: auto;
     display: flow-root;
+}
+
+.btn {
+    background: var(--color-main);
+    color: var(--color-bg);
+    padding: 8px 16px;
+    border-radius: 6px;
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.btn:hover {
+    background: var(--color-accent);
 }
 
 
