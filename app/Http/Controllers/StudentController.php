@@ -17,7 +17,9 @@ class StudentController extends Controller
     public function index(): View
     {
         // sunjectsテーブルのデータをコレクション形式で一括取得
-        $students = Student::all();
+        $students = Student::query()
+            ->orderBy('furigana')
+            ->get();
 
         // resources/views/tests/tests/index.blade.phpのファイルを画面に表示
         return view('students.index', compact('students'));
@@ -32,18 +34,10 @@ class StudentController extends Controller
     }
 
     // 新規作成保存処理
-    public function store(Request $request, ?Student $student = null): RedirectResponse
+    public function store(Request $request): RedirectResponse
     {
-        // バリデーションチェック
-        $validated = $request->validate([
-            'name' => ['required', 'string', 'max:100'],
-            'furigana' => ['required', 'string', 'max:300'],
-            'student_number' => ['required', 'string', 'max:20', Rule::unique('students')->ignore($student)],
-        ]);
-        $validated['is_active'] = $request->boolean('is_active');
-
         // subjectテーブルにデータを保存
-        $student = Student::create($validated);
+        $student = Student::create($this->validated($request));
 
         // 処理が完了したらtests.indexにリダイレクト
         // view()はビューファイルのパスだけど、route()はルート名を書く
@@ -65,16 +59,8 @@ class StudentController extends Controller
     // 編集保存処理
     public function update(Request $request, Student $student): RedirectResponse
     {
-        // バリデーションチェック
-        $validated = $request->validate([
-            'name' => ['required', 'string', 'max:100'],
-            'furigana' => ['required', 'string', 'max:300'],
-            'student_number' => ['required', 'string', 'max:20', Rule::unique('students')->ignore($student)],
-        ]);
-        $validated['is_active'] = $request->boolean('is_active');
-
         // subjectテーブルにデータを保存
-        $student->update($validated);
+        $student->update($this->validated($request, $student));
 
 
         return redirect()->route('students.index');
@@ -86,5 +72,18 @@ class StudentController extends Controller
         $student->delete();
 
         return redirect()->route('students.index');
+    }
+
+    private function validated(Request $request, ?Student $student = null): array
+    {
+            // バリデーションチェック
+        $validated = $request->validate([
+            'name' => ['required', 'string', 'max:100'],
+            'furigana' => ['required', 'string', 'max:300'],
+            'student_number' => ['required', 'string', 'max:20', Rule::unique('students')->ignore($student)],
+        ]);
+        $validated['is_active'] = $request->boolean('is_active');
+
+        return $validated;
     }
 }
